@@ -2,7 +2,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Installing TrufNetwork Postgres MCP..."
+echo "🚀 Installing TRUF.NETWORK Postgres MCP..."
 echo ""
 
 # Colors for output
@@ -177,7 +177,7 @@ if [ "$PSQL_AVAILABLE" = true ]; then
 fi
 
 # Install the MCP server
-echo "📦 Installing TrufNetwork Postgres MCP server with pipx..."
+echo "📦 Installing TRUF.NETWORK Postgres MCP server with pipx..."
 
 # Check if already installed and uninstall if needed
 if pipx list | grep -q "postgres-mcp"; then
@@ -246,7 +246,7 @@ echo ""
 # Verify installation
 echo "🔍 Verifying installation..."
 if pipx list | grep -q "postgres-mcp"; then
-    echo -e "${GREEN}✅ TrufNetwork Postgres MCP is installed and available${NC}"
+    echo -e "${GREEN}✅ TRUF.NETWORK Postgres MCP is installed and available${NC}"
     
     # Show where it's installed
     INSTALL_PATH=$(pipx list --verbose | grep -A 5 "postgres-mcp" | grep "installed package" | cut -d' ' -f4)
@@ -274,7 +274,7 @@ echo ""
 echo -e "${GREEN}🎉 Installation completed successfully!${NC}"
 echo ""
 echo "📋 What was installed:"
-echo "  • TrufNetwork Postgres MCP server (isolated with pipx)"
+echo "  • TRUF.NETWORK Postgres MCP server (isolated with pipx)"
 echo "  • Claude Desktop configuration"
 echo ""
 echo "🔧 Configuration details:"
