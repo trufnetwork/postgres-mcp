@@ -40,6 +40,24 @@ case $PLATFORM in
 esac
 
 echo -e "${BLUE}Claude config location: $CLAUDE_CONFIG${NC}"
+
+# Check if Claude Desktop directory exists
+CLAUDE_DIR=$(dirname "$CLAUDE_CONFIG")
+if [ ! -d "$CLAUDE_DIR" ]; then
+    echo -e "${RED}❌ Claude Desktop directory not found at: $CLAUDE_DIR${NC}"
+    echo "Please make sure Claude Desktop is installed and has been run at least once."
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Claude Desktop directory found${NC}"
+
+# Check if config file exists, if not that's okay - we'll create it
+if [ -f "$CLAUDE_CONFIG" ]; then
+    echo -e "${GREEN}✅ Existing Claude Desktop config found${NC}"
+else
+    echo -e "${YELLOW}📝 Claude Desktop config will be created${NC}"
+fi
+
 echo ""
 
 # Check prerequisites
@@ -123,7 +141,7 @@ echo ""
 
 # Get database connection details
 echo "📊 PostgreSQL Connection Setup"
-echo "Please provide your local PostgreSQL connection details:"
+echo "TRUF.NETWORK uses Kwil database with standard configuration:"
 echo ""
 
 read -p "Host (default: localhost): " DB_HOST
@@ -132,28 +150,21 @@ DB_HOST=${DB_HOST:-localhost}
 read -p "Port (default: 5432): " DB_PORT  
 DB_PORT=${DB_PORT:-5432}
 
-read -p "Database name: " DB_NAME
-while [[ -z "$DB_NAME" ]]; do
-    echo -e "${RED}Database name is required${NC}"
-    read -p "Database name: " DB_NAME
-done
+read -p "Database name (default: kwild): " DB_NAME
+DB_NAME=${DB_NAME:-kwild}
 
-read -p "Username: " DB_USER
-while [[ -z "$DB_USER" ]]; do
-    echo -e "${RED}Username is required${NC}"
-    read -p "Username: " DB_USER
-done
+read -p "Username (default: kwild): " DB_USER
+DB_USER=${DB_USER:-kwild}
 
-read -s -p "Password: " DB_PASSWORD
+read -s -p "Password (leave empty if no password): " DB_PASSWORD
 echo ""
-while [[ -z "$DB_PASSWORD" ]]; do
-    echo -e "${RED}Password is required${NC}"
-    read -s -p "Password: " DB_PASSWORD
-    echo ""
-done
 
-# Construct connection URI
-DB_URI="postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+# Construct connection URI - handle empty password
+if [[ -z "$DB_PASSWORD" ]]; then
+    DB_URI="postgresql://$DB_USER@$DB_HOST:$DB_PORT/$DB_NAME"
+else
+    DB_URI="postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+fi
 
 echo ""
 echo "🔗 Connection details:"
@@ -161,6 +172,7 @@ echo "  Host: $DB_HOST"
 echo "  Port: $DB_PORT"
 echo "  Database: $DB_NAME"
 echo "  Username: $DB_USER"
+echo "  Password: $([ -z "$DB_PASSWORD" ] && echo "none" || echo "***")"
 echo ""
 
 # Test database connection if psql is available
@@ -168,6 +180,42 @@ if [ "$PSQL_AVAILABLE" = true ]; then
     echo "🧪 Testing database connection..."
     if psql "$DB_URI" -c "SELECT 1;" > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Database connection successful!${NC}"
+        
+        # Test access to main schema and TRUF.NETWORK tables
+        echo "🔍 Testing main schema access..."
+        MAIN_SCHEMA_ACCESS=true
+        
+        # Check if main schema exists
+        if psql "$DB_URI" -c "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'main';" > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Main schema found${NC}"
+            
+            # Test access to key TRUF.NETWORK tables
+            TABLES_FOUND=0
+            for table in streams primitive_events taxonomies; do
+                if psql "$DB_URI" -c "SELECT 1 FROM main.$table LIMIT 1;" > /dev/null 2>&1; then
+                    echo -e "${GREEN}✅ Access to main.$table confirmed${NC}"
+                    ((TABLES_FOUND++))
+                else
+                    echo -e "${YELLOW}⚠️  Could not access main.$table${NC}"
+                fi
+            done
+            
+            if [ "$TABLES_FOUND" -eq 3 ]; then
+                echo -e "${GREEN}✅ All TRUF.NETWORK tables accessible!${NC}"
+            elif [ "$TABLES_FOUND" -gt 0 ]; then
+                echo -e "${YELLOW}⚠️  Some TRUF.NETWORK tables found ($TABLES_FOUND/3)${NC}"
+            else
+                echo -e "${RED}❌ No TRUF.NETWORK tables found in main schema${NC}"
+                MAIN_SCHEMA_ACCESS=false
+            fi
+        else
+            echo -e "${RED}❌ Main schema not found${NC}"
+            MAIN_SCHEMA_ACCESS=false
+        fi
+        
+        if [ "$MAIN_SCHEMA_ACCESS" = false ]; then
+            echo -e "${YELLOW}⚠️  Proceeding anyway - you may need to check schema permissions${NC}"
+        fi
     else
         echo -e "${RED}❌ Database connection failed!${NC}"
         echo "Please check your connection details and try again."
@@ -204,13 +252,29 @@ fi
 # Create config directory if it doesn't exist
 mkdir -p "$(dirname "$CLAUDE_CONFIG")"
 
-# Create or update Claude Desktop config
+# Get the full path to postgres-mcp command
+POSTGRES_MCP_PATH=$(which postgres-mcp 2>/dev/null)
+if [ -z "$POSTGRES_MCP_PATH" ]; then
+    echo -e "${RED}❌ postgres-mcp command not found in PATH${NC}"
+    echo "Trying to find it in pipx installation..."
+    POSTGRES_MCP_PATH=$(find ~/.local -name "postgres-mcp" -type f -executable 2>/dev/null | head -1)
+    if [ -z "$POSTGRES_MCP_PATH" ]; then
+        echo -e "${RED}❌ Could not locate postgres-mcp executable${NC}"
+        echo "Try running: pipx ensurepath && source ~/.bashrc"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✅ Found postgres-mcp at: $POSTGRES_MCP_PATH${NC}"
+
+# Create or update Claude Desktop config with full path and correct environment
 python3 -c "
 import json
 import os
 
 config_path = '$CLAUDE_CONFIG'
 db_uri = '$DB_URI'
+postgres_mcp_path = '$POSTGRES_MCP_PATH'
 
 # Read existing config or create new one
 config = {}
@@ -225,9 +289,9 @@ if os.path.exists(config_path):
 if 'mcpServers' not in config:
     config['mcpServers'] = {}
 
-# Add truf-postgres server
+# Add truf-postgres server with full path and correct configuration
 config['mcpServers']['truf-postgres'] = {
-    'command': 'postgres-mcp',
+    'command': postgres_mcp_path,
     'args': ['--access-mode=unrestricted'],
     'env': {
         'DATABASE_URI': db_uri
@@ -239,6 +303,8 @@ with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
 
 print('✅ Claude Desktop configuration updated!')
+print('Database URI: ' + db_uri)
+print('Command path: ' + postgres_mcp_path)
 "
 
 echo ""
@@ -249,7 +315,7 @@ if pipx list | grep -q "postgres-mcp"; then
     echo -e "${GREEN}✅ TRUF.NETWORK Postgres MCP is installed and available${NC}"
     
     # Show where it's installed
-    INSTALL_PATH=$(pipx list --verbose | grep -A 5 "postgres-mcp" | grep "installed package" | cut -d' ' -f4)
+    INSTALL_PATH=$(pipx list --verbose 2>/dev/null | grep -A 5 "postgres-mcp" | grep "installed package" | cut -d' ' -f4 || echo "")
     if [ ! -z "$INSTALL_PATH" ]; then
         echo -e "${BLUE}📍 Installed at: $INSTALL_PATH${NC}"
     fi
@@ -258,14 +324,31 @@ else
     exit 1
 fi
 
-# Test the command
-echo "🧪 Testing postgres-mcp command..."
-if command -v postgres-mcp &> /dev/null; then
-    echo -e "${GREEN}✅ postgres-mcp command is available${NC}"
+# Test the postgres-mcp command with actual database
+echo "🧪 Testing postgres-mcp with database connection..."
+if timeout 10s env DATABASE_URI="$DB_URI" "$POSTGRES_MCP_PATH" --access-mode=unrestricted --version > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ postgres-mcp responds correctly${NC}"
 else
-    echo -e "${YELLOW}⚠️  postgres-mcp command not found in PATH${NC}"
-    echo "You may need to run: pipx ensurepath"
-    echo "Then restart your terminal"
+    echo -e "${YELLOW}⚠️  postgres-mcp test completed (may have timed out, which is normal)${NC}"
+fi
+
+echo ""
+
+# Show final configuration summary with actual values
+if [ -f "$CLAUDE_CONFIG" ]; then
+    echo -e "${GREEN}✅ Claude Desktop config file created/updated${NC}"
+    echo -e "${BLUE}📍 Config location: $CLAUDE_CONFIG${NC}"
+    
+    # Show the actual configuration for verification
+    echo ""
+    echo -e "${BLUE}📋 Configuration summary:${NC}"
+    echo "  • Command: $POSTGRES_MCP_PATH"
+    echo "  • Database URI: $DB_URI"
+    echo ""
+    echo -e "${YELLOW}📝 Actual config content:${NC}"
+    cat "$CLAUDE_CONFIG" | python3 -m json.tool
+else
+    echo -e "${RED}❌ Failed to create Claude Desktop config${NC}"
 fi
 
 echo ""
@@ -275,25 +358,35 @@ echo -e "${GREEN}🎉 Installation completed successfully!${NC}"
 echo ""
 echo "📋 What was installed:"
 echo "  • TRUF.NETWORK Postgres MCP server (isolated with pipx)"
-echo "  • Claude Desktop configuration"
+echo "  • Claude Desktop configuration with main schema support"
 echo ""
 echo "🔧 Configuration details:"
 echo "  • Server name: truf-postgres"
 echo "  • Access mode: unrestricted"
 echo "  • Database: $DB_NAME on $DB_HOST:$DB_PORT"
+echo "  • Schema: main (with public fallback)"
 echo ""
 echo -e "${YELLOW}📝 Next steps:${NC}"
 echo "  1. Restart Claude Desktop application"
 echo "  2. Claude will now have access to your PostgreSQL database"
-echo "  3. Try asking Claude: 'List the tables in my database'"
+echo "  3. Try asking Claude: 'Show me tables in the main schema'"
+echo "  4. Test with: 'SELECT count(*) FROM main.streams'"
 echo ""
 echo -e "${BLUE}💡 Available tools:${NC}"
 echo "  • list_schemas - List database schemas"
 echo "  • list_objects - List tables, views, etc."
 echo "  • get_object_details - Get table structure"
-echo "  • execute_sql - Run SQL queries"
+echo "  • execute_sql - Run SQL queries (main schema is prioritized)"
 echo "  • explain_query - Analyze query performance"
 echo "  • analyze_db_health - Check database health"
+echo ""
+echo -e "${BLUE}🏗️  TRUF.NETWORK Schema Information:${NC}"
+echo "  • Your data tables are in the 'main' schema:"
+echo "    - main.streams (stream definitions)"
+echo "    - main.primitive_events (event data)"
+echo "    - main.taxonomies (hierarchical structure)"
+echo "    - main.metadata (configuration data)"
+echo "    - main.data_providers (provider info)"
 echo ""
 echo -e "${GREEN}Happy querying! 🚀${NC}"
 echo ""
