@@ -650,18 +650,19 @@ async def check_stream_type(
     try:
         sql_driver = await get_sql_driver()
         
-        query = """
-        SELECT 
-            data_provider,
-            stream_id, 
-            stream_type,
-            created_at
-        FROM streams 
-        WHERE data_provider = $1 AND stream_id = $2
-        """
-        
-        rows = await sql_driver.execute_query(query, [data_provider.lower(), stream_id])
-        
+        rows = await SafeSqlDriver.execute_param_query(
+            sql_driver,
+            """
+            SELECT 
+                data_provider,
+                stream_id, 
+                stream_type,
+                created_at
+            FROM main.streams
+            WHERE LOWER(data_provider) = {} AND stream_id = {}
+            """,
+            [data_provider.lower(), stream_id],
+        )
         if not rows:
             return format_text_response({
                 "found": False,
