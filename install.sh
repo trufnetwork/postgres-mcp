@@ -265,6 +265,18 @@ if [ -z "$POSTGRES_MCP_PATH" ]; then
     fi
 fi
 
+# Convert Unix path to Windows path for Windows platform
+if [ "$PLATFORM" = "windows" ]; then
+    # Convert /c/users/... to C:\Users\... and add .exe extension if needed
+    if [[ "$POSTGRES_MCP_PATH" == /c/* ]]; then
+        POSTGRES_MCP_PATH=$(echo "$POSTGRES_MCP_PATH" | sed 's|^/c/|C:/|' | sed 's|/|\\|g')
+    fi
+    # Ensure .exe extension
+    if [[ "$POSTGRES_MCP_PATH" != *.exe ]]; then
+        POSTGRES_MCP_PATH="${POSTGRES_MCP_PATH}.exe"
+    fi
+fi
+
 echo -e "${GREEN}✅ Found postgres-mcp at: $POSTGRES_MCP_PATH${NC}"
 
 # Create or update Claude Desktop config with full path and correct environment
@@ -272,9 +284,9 @@ python3 -c "
 import json
 import os
 
-config_path = '$CLAUDE_CONFIG'
-db_uri = '$DB_URI'
-postgres_mcp_path = '$POSTGRES_MCP_PATH'
+config_path = r'$CLAUDE_CONFIG'
+db_uri = r'$DB_URI'
+postgres_mcp_path = r'$POSTGRES_MCP_PATH'
 
 # Read existing config or create new one
 config = {}
@@ -302,7 +314,7 @@ config['mcpServers']['truf-postgres'] = {
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
 
-print('✅ Claude Desktop configuration updated!')
+print('Claude Desktop configuration updated!')
 print('Database URI: ' + db_uri)
 print('Command path: ' + postgres_mcp_path)
 "
