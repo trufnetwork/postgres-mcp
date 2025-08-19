@@ -509,7 +509,7 @@ async def get_top_queries(
         logger.error(f"Error getting slow queries: {e}")
         return format_error_response(str(e))
     
-@mcp.tool(description="Get records from composed streams (where stream_type='composed' in streams table)")
+@mcp.tool(description="Get records from COMPOSED streams only (stream_type='composed'). Use check_stream_type first if unsure.")
 async def get_composed_stream_records(
     data_provider: str = Field(description="Stream deployer address (0x... format, 42 characters)"),
     stream_id: str = Field(description="Composed stream ID (starts with 'st', 32 characters total)"),
@@ -628,7 +628,7 @@ async def get_latest_composed_stream_record(
     )
 
 
-@mcp.tool(description="Check if a stream is primitive or composed type")
+@mcp.tool(description="Check stream type first - use this to determine if stream is 'primitive' or 'composed' before using other tools")
 async def check_stream_type(
     data_provider: str = Field(description="Stream deployer address (0x... format)"),
     stream_id: str = Field(description="Stream ID to check"),
