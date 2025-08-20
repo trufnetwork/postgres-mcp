@@ -6,7 +6,7 @@ import os
 import signal
 import sys
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 from typing import List
 from typing import Literal
 from typing import Union
@@ -32,6 +32,7 @@ from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
 from .top_queries import TopQueriesCalc
+from .truf.composed_stream import ComposedStreamTool
 
 # Initialize FastMCP with default settings
 mcp = FastMCP("postgres-mcp")
@@ -507,6 +508,189 @@ async def get_top_queries(
     except Exception as e:
         logger.error(f"Error getting slow queries: {e}")
         return format_error_response(str(e))
+    
+@mcp.tool(description="Get records from COMPOSED streams only (stream_type='composed'). Use check_stream_type first if unsure.")
+async def get_composed_stream_records(
+    data_provider: str = Field(description="Stream deployer address (0x... format, 42 characters)"),
+    stream_id: str = Field(description="Composed stream ID (starts with 'st', 32 characters total)"),
+    from_time: Optional[int] = Field(description="Start timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None),
+    to_time: Optional[int] = Field(description="End timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None),
+    frozen_at: Optional[int] = Field(description="Created-at cutoff timestamp for time-travel queries (optional)", default=None),
+    use_cache: bool = Field(description="Whether to use cache for performance optimization", default=False),
+) -> ResponseType:
+    """
+    Get records from composed streams with complex time series calculations.
+    
+    This tool is specifically for streams where stream_type='composed' in the streams table.
+    It handles recursive taxonomy resolution, time-varying weights, aggregation, 
+    and Last Observation Carried Forward (LOCF) logic.
+    
+    Use this when:
+    - Querying streams with stream_type = 'composed' 
+    - Need calculated/aggregated values from multiple primitive streams
+    - Require time series data with complex dependencies
+    
+    For primitive streams (stream_type='primitive'), use direct queries on primitive_events table.
+    
+    Args:
+        data_provider: Stream deployer address (must be 0x followed by 40 hex characters)
+        stream_id: Composed stream identifier (must start with 'st' and be 32 chars total)
+        from_time: Start timestamp (inclusive) - omit both from/to for latest record
+        to_time: End timestamp (inclusive) - omit both from/to for latest record  
+        frozen_at: Optional timestamp for time-travel queries
+        use_cache: Whether to use cache for better performance
+        
+    Returns:
+        List of records with event_time and calculated value fields
+    """
+    try:
+        # Validate input parameters
+        if not data_provider.startswith('0x') or len(data_provider) != 42:
+            return format_error_response("data_provider must be 0x followed by 40 hex characters")
+            
+        if not stream_id.startswith('st') or len(stream_id) != 32:
+            return format_error_response("stream_id must start with 'st' and be 32 characters total")
+        
+        # Validate time range
+        if from_time is not None and to_time is not None and from_time > to_time:
+            return format_error_response(f"Invalid time range: from_time ({from_time}) > to_time ({to_time})")
+        
+        sql_driver = await get_sql_driver()
+        composed_tool = ComposedStreamTool(sql_driver)
+        
+        # Execute the composed stream calculation
+        records = await composed_tool.get_record_composed(
+            data_provider=data_provider,
+            stream_id=stream_id,
+            from_time=from_time,
+            to_time=to_time,
+            frozen_at=frozen_at,
+            use_cache=use_cache
+        )
+        
+        # Format successful response
+        result = {
+            "success": True,
+            "stream_type": "composed",
+            "data_provider": data_provider,
+            "stream_id": stream_id,
+            "record_count": len(records),
+            "records": records,
+            "query_parameters": {
+                "from_time": from_time,
+                "to_time": to_time,
+                "frozen_at": frozen_at,
+                "use_cache": use_cache
+            }
+        }
+        
+        if len(records) == 0:
+            result["message"] = "No records found for the specified composed stream and time range"
+        
+        return format_text_response(result)
+        
+    except Exception as e:
+        logger.error(f"Error in get_composed_stream_records: {e}")
+        return format_error_response(f"Failed to get composed stream records: {str(e)}")
+
+
+@mcp.tool(description="Get the latest record from a composed stream (convenience function)")
+async def get_latest_composed_stream_record(
+    data_provider: str = Field(description="Stream deployer address (0x... format)"),
+    stream_id: str = Field(description="Composed stream ID (starts with 'st')"),
+    frozen_at: Optional[int] = Field(description="Optional created-at cutoff timestamp for time-travel queries", default=None),
+    use_cache: bool = Field(description="Whether to use cache for performance", default=False),
+) -> ResponseType:
+    """
+    Get the most recent record from a composed stream.
+    
+    This is a convenience function that calls get_composed_stream_records with 
+    both from_time and to_time set to None, which triggers the "latest record only" mode.
+    
+    Use this when you only need the current/latest calculated value from a composed stream.
+    
+    Args:
+        data_provider: Stream deployer address  
+        stream_id: Composed stream identifier
+        frozen_at: Optional timestamp for time-travel queries
+        use_cache: Whether to use cache for performance
+        
+    Returns:
+        Single latest record with event_time and calculated value
+    """
+    return await get_composed_stream_records(
+        data_provider=data_provider,
+        stream_id=stream_id,
+        from_time=None,  # Both None triggers latest record mode
+        to_time=None,
+        frozen_at=frozen_at,
+        use_cache=use_cache
+    )
+
+
+@mcp.tool(description="Check stream type first - use this to determine if stream is 'primitive' or 'composed' before using other tools")
+async def check_stream_type(
+    data_provider: str = Field(description="Stream deployer address (0x... format)"),
+    stream_id: str = Field(description="Stream ID to check"),
+) -> ResponseType:
+    """
+    Check whether a stream is primitive or composed type.
+    
+    This helper tool allows Claude to determine which tool to use:
+    - For primitive streams: Query primitive_events table directly
+    - For composed streams: Use get_composed_stream_records tool
+    
+    Args:
+        data_provider: Stream deployer address
+        stream_id: Stream identifier to check
+        
+    Returns:
+        Stream type information and guidance on which tool to use
+    """
+    try:
+        sql_driver = await get_sql_driver()
+        
+        rows = await SafeSqlDriver.execute_param_query(
+            sql_driver,
+            """
+            SELECT 
+                data_provider,
+                stream_id, 
+                stream_type,
+                created_at
+            FROM main.streams
+            WHERE LOWER(data_provider) = {} AND stream_id = {}
+            """,
+            [data_provider.lower(), stream_id],
+        )
+        if not rows:
+            return format_text_response({
+                "found": False,
+                "message": f"Stream not found: {data_provider}/{stream_id}",
+                "data_provider": data_provider,
+                "stream_id": stream_id
+            })
+        
+        row = rows[0]
+        stream_type = row.cells["stream_type"]
+        
+        result = {
+            "found": True,
+            "data_provider": row.cells["data_provider"],
+            "stream_id": row.cells["stream_id"],
+            "stream_type": stream_type,
+            "created_at": row.cells["created_at"],
+            "recommended_action": {
+                "primitive": "Query the primitive_events table directly for this stream",
+                "composed": "Use get_composed_stream_records tool for calculated time series data"
+            }.get(stream_type, "Unknown stream type")
+        }
+        
+        return format_text_response(result)
+        
+    except Exception as e:
+        logger.error(f"Error checking stream type: {e}")
+        return format_error_response(f"Failed to check stream type: {str(e)}")
 
 
 async def main():

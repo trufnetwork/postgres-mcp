@@ -87,7 +87,6 @@ reportMissingTypeStubs = false
 # reportUnknownVariableType = true
 # reportUnknownArgumentType = true
 reportPrivateUsage = true
-reportUntypedFunctionDecorator = true
 reportMissingTypeArgument = true
 reportInvalidTypeVarUse = true
 reportUnnecessaryCast = true
