@@ -73,20 +73,3 @@ class ComposedStreamTool:
         except Exception as e:
             logger.error(f"Error in get_record_composed for {data_provider}/{stream_id}: {e}")
             raise
-    
-    async def get_latest_record_composed(
-        self,
-        data_provider: str,
-        stream_id: str,
-        frozen_at: Optional[int] = None,
-        use_cache: bool = False
-    ) -> List[Dict[str, Any]]:
-        """Get the latest record from a composed stream."""
-        return await self.get_record_composed(
-            data_provider=data_provider,
-            stream_id=stream_id,
-            from_time=None,
-            to_time=None,
-            frozen_at=frozen_at,
-            use_cache=use_cache
-        )
