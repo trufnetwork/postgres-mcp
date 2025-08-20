@@ -1,11 +1,11 @@
 """
-Composed Stream Tool for handling complex time series calculations.
-Converts Kwil-DB stored procedure logic to PostgreSQL for composed streams.
+Composed Stream Tool
 """
 
 import logging
 from typing import Any, Dict, List, Optional
 from .query import COMPOSED_STREAM_RECORD_QUERY
+from ..sql import SafeSqlDriver
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,6 @@ class ComposedStreamTool:
         Get records from a composed stream using complex time series calculations.
         """
         try:
-            from ..sql import SafeSqlDriver
-            
             # Parameters
             params = [
                 data_provider.lower(),  # data_provider
