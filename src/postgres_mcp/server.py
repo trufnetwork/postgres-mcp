@@ -692,6 +692,72 @@ async def check_stream_type(
         logger.error(f"Error checking stream type: {e}")
         return format_error_response(f"Failed to check stream type: {str(e)}")
 
+@mcp.tool(description="Describe the taxonomy or composition of a composed stream - shows child streams, weights, and relationships")
+async def describe_stream_taxonomies(
+    data_provider: str = Field(description="Parent stream deployer address (0x... format)"),
+    stream_id: str = Field(description="Parent stream ID (starts with 'st')"),
+    latest_group_sequence: bool = Field(description="If True, only returns the latest/active taxonomy version", default=True),
+) -> ResponseType:
+    """
+    Describe the taxonomy composition of a composed stream.
+    
+    Shows what child streams make up a composed stream, their weights, 
+    and when the taxonomy definitions were created.
+    
+    Use this when users ask:
+    - "What is the composition of this stream?"
+    - "What streams make up this composed stream?"
+    - "Show me the taxonomy of this stream"
+    - "What are the weights in this stream?"
+    
+    Args:
+        data_provider: Parent stream deployer address
+        stream_id: Parent stream identifier
+        latest_group_sequence: True = only current active taxonomy, False = all historical versions
+        
+    Returns:
+        List of child streams with their weights and taxonomy details
+    """
+    try:
+        sql_driver = await get_sql_driver()
+        composed_tool = ComposedStreamTool(sql_driver)
+        
+        records = await composed_tool.describe_taxonomies(
+            data_provider=data_provider,
+            stream_id=stream_id,
+            latest_group_sequence=latest_group_sequence
+        )
+        
+        if not records:
+            result = {
+                "success": True,
+                "message": f"No taxonomy found for stream {data_provider}/{stream_id}. This might be a primitive stream or the stream might not exist.",
+                "data_provider": data_provider,
+                "stream_id": stream_id,
+                "taxonomy_count": 0,
+                "taxonomy": []
+            }
+        else:
+            result = {
+                "success": True,
+                "data_provider": data_provider,
+                "stream_id": stream_id,
+                "latest_only": latest_group_sequence,
+                "taxonomy_count": len(records),
+                "taxonomy": records,
+                "summary": {
+                    "total_child_streams": len(set(r["child_stream_id"] for r in records)),
+                    "total_weight": sum(float(r["weight"]) for r in records),
+                    "group_sequences": sorted(set(r["group_sequence"] for r in records))
+                }
+            }
+        
+        return format_text_response(result)
+        
+    except Exception as e:
+        logger.error(f"Error describing taxonomies: {e}")
+        return format_error_response(f"Failed to describe stream taxonomies: {str(e)}")
+
 
 async def main():
     # Parse command line arguments

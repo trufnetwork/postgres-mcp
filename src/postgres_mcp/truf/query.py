@@ -394,3 +394,43 @@ COMPOSED_STREAM_RECORD_QUERY = """
   WHERE event_time IS NOT NULL
   ORDER BY event_time DESC;
 """
+
+TAXONOMIES_QUERY = """
+  WITH stream_ref_lookup AS (
+      SELECT s.id as stream_ref
+      FROM main.streams s
+      WHERE LOWER(s.data_provider) = LOWER({})
+        AND s.stream_id = {}
+      LIMIT 1
+  ),
+  latest_group_sequence AS (
+      SELECT MAX(t.group_sequence) as max_group_sequence
+      FROM main.taxonomies t
+      CROSS JOIN stream_ref_lookup srl
+      WHERE t.stream_ref = srl.stream_ref
+        AND t.disabled_at IS NULL
+  )
+  SELECT
+      parent_s.data_provider,
+      parent_s.stream_id,
+      child_s.data_provider as child_data_provider,
+      child_s.stream_id as child_stream_id,
+      t.weight,
+      t.created_at,
+      t.group_sequence,
+      t.start_time AS start_date
+  FROM main.taxonomies t
+  JOIN main.streams parent_s ON t.stream_ref = parent_s.id
+  JOIN main.streams child_s ON t.child_stream_ref = child_s.id
+  CROSS JOIN stream_ref_lookup srl
+  CROSS JOIN latest_group_sequence lgs
+  WHERE t.disabled_at IS NULL
+    AND t.stream_ref = srl.stream_ref
+    AND (
+        CASE 
+            WHEN {} = true THEN t.group_sequence = lgs.max_group_sequence
+            ELSE true
+        END
+    )
+  ORDER BY t.group_sequence DESC, t.created_at DESC;
+"""
