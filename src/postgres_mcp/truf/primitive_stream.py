@@ -18,7 +18,7 @@ class PrimitiveStreamTool:
         """Initialize with SQL driver for database operations."""
         self.sql_driver = sql_driver
 
-    async def get_index_primitive(
+    async def get_index(
         self,
         data_provider: str,
         stream_id: str,
