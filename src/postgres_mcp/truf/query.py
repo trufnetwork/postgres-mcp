@@ -1040,3 +1040,64 @@ COMPOSED_STREAM_INDEX_QUERY = """
             FROM result
             ORDER BY event_time ASC;
 """
+
+STREAM_REF_QUERY = """
+  SELECT s.id as stream_ref
+  FROM main.streams s
+  WHERE LOWER(s.data_provider) = LOWER({})
+    AND s.stream_id = {}
+  LIMIT 1;
+"""
+
+PRIMITIVE_STREAM_RECORD_QUERY = """
+   WITH
+    -- Get base records within time range
+    interval_records AS (
+        SELECT
+            pe.event_time,
+            pe.value,
+            ROW_NUMBER() OVER (
+                PARTITION BY pe.event_time
+                ORDER BY pe.created_at DESC
+            ) as rn
+        FROM main.primitive_events pe
+        WHERE pe.stream_ref = {}
+            AND pe.created_at <= {}
+            AND pe.event_time > {}
+            AND pe.event_time <= {}
+    ),
+
+    -- Get anchor at or before from date
+    anchor_record AS (
+        SELECT pe.event_time, pe.value
+        FROM main.primitive_events pe
+        WHERE pe.stream_ref = {}
+            AND pe.event_time <= {}
+            AND pe.created_at <= {}
+        ORDER BY pe.event_time DESC, pe.created_at DESC
+        LIMIT 1
+    ),
+
+    -- Combine results with gap filling logic
+    combined_results AS (
+        -- Add gap filler if needed
+        SELECT event_time, value FROM anchor_record
+        UNION ALL
+        -- Add filtered base records
+        SELECT event_time, value FROM interval_records
+        WHERE rn = 1
+    )
+    -- Final selection
+    SELECT event_time, value FROM combined_results
+    ORDER BY event_time ASC;
+"""
+
+PRIMITIVE_STREAM_LAST_RECORD_QUERY = """
+  SELECT pe.event_time, pe.value
+  FROM main.primitive_events pe
+  WHERE pe.stream_ref = {}
+    AND pe.event_time < {}
+    AND pe.created_at <= {}
+  ORDER BY pe.event_time DESC, pe.created_at DESC
+  LIMIT 1;
+"""
