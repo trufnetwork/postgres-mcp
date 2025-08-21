@@ -1,6 +1,7 @@
 # ruff: noqa: B008
 import argparse
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -759,6 +760,48 @@ async def describe_stream_taxonomies(
         logger.error(f"Error describing taxonomies: {e}")
         return format_error_response(f"Failed to describe stream taxonomies: {str(e)}")
 
+@mcp.tool(description="Get index data for COMPOSED STREAM ONLY")
+async def get_composed_stream_index(
+    data_provider: str = Field(description="Stream deployer address (0x... format)"),
+    stream_id: str = Field(description="Stream ID (starts with 'st')"),
+    from_time: Optional[int] = Field(description="Start timestamp (inclusive)", default=None),
+    to_time: Optional[int] = Field(description="End timestamp (inclusive)", default=None),
+    frozen_at: Optional[int] = Field(description="Created-at cutoff for time-travel queries", default=None),
+    base_time: Optional[int] = Field(description="Base timestamp for index calculations", default=None),
+    use_cache: bool = Field(description="Whether to use cache (composed streams only)", default=False),
+) -> ResponseType:
+    """
+    Get index data for composed stream only.
+    """
+    try:
+        sql_driver = await get_sql_driver()
+        
+        composed_tool = ComposedStreamTool(sql_driver)
+        records = await composed_tool.get_index(
+            data_provider=data_provider,
+            stream_id=stream_id,
+            from_time=from_time,
+            to_time=to_time,
+            frozen_at=frozen_at,
+            base_time=base_time,
+            use_cache=use_cache
+        )
+        
+        result = {
+            "success": True,
+            "stream_type": "composed",
+            "data_provider": data_provider,
+            "stream_id": stream_id,
+            "index_count": len(records),
+            "index_data": records
+        }
+        
+        return format_text_response(result)
+        
+    except Exception as e:
+        logger.error(f"Error in get_stream_index: {e}")
+        return format_error_response(f"Failed to get stream index: {str(e)}")
+    
 @mcp.tool(description="Get index data for PRIMITIVE STREAM ONLY")
 async def get_primitive_stream_index(
     data_provider: str = Field(description="Stream deployer address (0x... format)"),

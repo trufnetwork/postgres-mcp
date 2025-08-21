@@ -4,7 +4,7 @@ Composed Stream Tool
 
 import logging
 from typing import Any, Dict, List, Optional
-from .query import COMPOSED_STREAM_RECORD_QUERY, TAXONOMIES_QUERY
+from .query import COMPOSED_STREAM_INDEX_QUERY, COMPOSED_STREAM_RECORD_QUERY, TAXONOMIES_QUERY
 from ..sql import SafeSqlDriver
 
 logger = logging.getLogger(__name__)
@@ -127,4 +127,72 @@ class ComposedStreamTool:
             
         except Exception as e:
             logger.error(f"Error describing taxonomies for {data_provider}/{stream_id}: {e}")
+            raise
+        
+    async def get_index(
+        self, 
+        data_provider: str,
+        stream_id: str,
+        from_time: Optional[int] = None,
+        to_time: Optional[int] = None,
+        frozen_at: Optional[int] = None,
+        base_time: Optional[int] = None,
+        use_cache: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get index data for composed streams.
+        
+        Args:
+            data_provider: Stream deployer address
+            stream_id: Stream identifier
+            from_time: Start timestamp (inclusive)
+            to_time: End timestamp (inclusive)
+            frozen_at: Created-at cutoff for time-travel queries
+            base_time: Base timestamp for index calculations
+            use_cache: Whether to use cache for performance
+            
+        Returns:
+            List of index records with event_time and value
+        """
+        try:
+          params = [
+              data_provider,      # {} - data_provider
+              stream_id,          # {} - stream_id
+              from_time,          # {} - from_param
+              to_time,            # {} - to_param
+              frozen_at,          # {} - frozen_at_param
+              base_time,          # {} - base_time_param
+              use_cache,          # {} - use_cache_param
+              from_time,          # {} - effective_from
+              to_time,            # {} - effective_to
+              frozen_at,          # {} - effective_frozen_at
+              base_time,          # {} - effective_base_time
+          ]
+          
+          logger.debug(f"Executing composed index query for {data_provider}/{stream_id}")
+          
+          rows = await SafeSqlDriver.execute_param_query(
+              self.sql_driver,
+              COMPOSED_STREAM_INDEX_QUERY,
+              params
+          )
+
+          if not rows:
+            logger.info(f"Index cannot be calculated for stream {data_provider}/{stream_id}")
+            return []
+          
+          # Convert results
+          records = []
+          for row in rows:
+              record = {
+                  "event_time": row.cells.get("event_time"),
+                  "value": str(row.cells.get("value", "0"))
+              }
+              records.append(record)
+          
+          logger.info(f"Retrieved {len(records)} composed index records for {data_provider}/{stream_id}")
+          return records
+          
+        except Exception as e:
+            logger.error(f"Error in get_index for {data_provider}/{stream_id}: {e}")
             raise
