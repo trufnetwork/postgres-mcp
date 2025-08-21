@@ -760,7 +760,7 @@ async def describe_stream_taxonomies(
         return format_error_response(f"Failed to describe stream taxonomies: {str(e)}")
 
 @mcp.tool(description="Get index data for COMPOSED STREAM ONLY")
-async def get_stream_index(
+async def get_composed_stream_index(
     data_provider: str = Field(description="Stream deployer address (0x... format)"),
     stream_id: str = Field(description="Stream ID (starts with 'st')"),
     from_time: Optional[int] = Field(description="Start timestamp (inclusive)", default=None),
