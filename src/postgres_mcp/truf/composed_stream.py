@@ -128,3 +128,6 @@ class ComposedStreamTool:
         except Exception as e:
             logger.error(f"Error describing taxonomies for {data_provider}/{stream_id}: {e}")
             raise
+        
+    async def get_index(self):
+      return None
