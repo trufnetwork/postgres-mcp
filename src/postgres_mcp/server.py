@@ -886,6 +886,15 @@ async def get_index_change(
         List of time points with their percentage change values (e.g., 2.147 = 2.147% change)
     """
     try:
+        if from_time > to_time:
+            return format_error_response(
+                f"Invalid time range: from_time ({from_time}) > to_time ({to_time})"
+            )
+        if time_interval <= 0:
+            return format_error_response(
+                f"time_interval must be > 0 (got {time_interval})"
+            )
+        
         sql_driver = await get_sql_driver()
         
         rows = await SafeSqlDriver.execute_param_query(
