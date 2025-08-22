@@ -35,6 +35,7 @@ from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
 from .top_queries import TopQueriesCalc
 from .truf.composed_stream import ComposedStreamTool
+from .truf.general import GeneralStreamTool
 
 # Initialize FastMCP with default settings
 mcp = FastMCP("postgres-mcp")
@@ -841,6 +842,156 @@ async def get_primitive_stream_index(
     except Exception as e:
         logger.error(f"Error in get_stream_index: {e}")
         return format_error_response(f"Failed to get stream index: {str(e)}")
+
+
+@mcp.tool(description="Calculate index change percentage over time interval - returns percentage change values (e.g., 2.147 = 2.147% change)")
+async def get_index_change(
+    data_provider: str = Field(description="Stream deployer address (0x... format)"),
+    stream_id: str = Field(description="Stream ID (starts with 'st')"),
+    from_time: int = Field(description="Start timestamp (inclusive) for current data"),
+    to_time: int = Field(description="End timestamp (inclusive) for current data"),
+    time_interval: int = Field(description="Time interval to look back for comparison (e.g., 86400 for 1 day)"),
+    frozen_at: Optional[int] = Field(description="Created-at cutoff for time-travel queries", default=None),
+    base_time: Optional[int] = Field(description="Base timestamp for index calculations", default=None),
+    use_cache: bool = Field(description="Whether to use cache for composed streams", default=False),
+) -> ResponseType:
+    """
+    Calculate percentage change in index values over a specified time interval.
+    
+    This tool compares current index values with previous values from time_interval ago.
+    For each current data point at time T, it finds the corresponding previous value 
+    at or before time (T - time_interval) and calculates: ((current - previous) * 100) / previous
+    
+    Returns percentage change values where 2.147 means a 2.147% increase.
+    
+    The tool automatically detects whether the stream is composed or primitive and uses
+    the appropriate index calculation method.
+    
+    Use this when:
+    - Analyzing index performance over time periods
+    - Calculating returns or percentage changes
+    - Comparing current values to historical baselines
+    
+    Args:
+        data_provider: Stream deployer address
+        stream_id: Stream identifier
+        from_time: Start timestamp for current data range
+        to_time: End timestamp for current data range  
+        time_interval: Time period to look back (in same units as timestamps)
+        frozen_at: Optional timestamp for time-travel queries
+        base_time: Optional base timestamp for index calculations
+        use_cache: Whether to use cache for performance (composed streams only)
+        
+    Returns:
+        List of time points with their percentage change values (e.g., 2.147 = 2.147% change)
+    """
+    try:
+        if from_time > to_time:
+            return format_error_response(
+                f"Invalid time range: from_time ({from_time}) > to_time ({to_time})"
+            )
+        if time_interval <= 0:
+            return format_error_response(
+                f"time_interval must be > 0 (got {time_interval})"
+            )
+        
+        sql_driver = await get_sql_driver()
+        
+        rows = await SafeSqlDriver.execute_param_query(
+            sql_driver,
+            """
+            SELECT stream_type
+            FROM main.streams
+            WHERE LOWER(data_provider) = {} AND stream_id = {}
+            """,
+            [data_provider.lower(), stream_id],
+        )
+        
+        if not rows:
+            return format_error_response(f"Stream not found: {data_provider}/{stream_id}")
+        
+        stream_type = rows[0].cells["stream_type"]
+        
+        # Calculate previous data time range
+        earliest_prev = from_time - time_interval
+        latest_prev = to_time - time_interval
+        
+        # Get current index data based on stream type
+        if stream_type == "composed":
+            composed_tool = ComposedStreamTool(sql_driver)
+            current_data = await composed_tool.get_index(
+                data_provider=data_provider,
+                stream_id=stream_id,
+                from_time=from_time,
+                to_time=to_time,
+                frozen_at=frozen_at,
+                base_time=base_time,
+                use_cache=use_cache
+            )
+            # Get previous data
+            prev_data = await composed_tool.get_index(
+                data_provider=data_provider,
+                stream_id=stream_id,
+                from_time=earliest_prev,
+                to_time=latest_prev,
+                frozen_at=frozen_at,
+                base_time=base_time,
+                use_cache=use_cache
+            )
+        else:  # primitive
+            primitive_tool = PrimitiveStreamTool(sql_driver)
+            current_data = await primitive_tool.get_index(
+                data_provider=data_provider,
+                stream_id=stream_id,
+                from_time=from_time,
+                to_time=to_time,
+                frozen_at=frozen_at,
+                base_time=base_time
+            )
+            # Get previous data
+            prev_data = await primitive_tool.get_index(
+                data_provider=data_provider,
+                stream_id=stream_id,
+                from_time=earliest_prev,
+                to_time=latest_prev,
+                frozen_at=frozen_at,
+                base_time=base_time
+            )
+        
+        # Calculate changes using GeneralStreamTool
+        general_tool = GeneralStreamTool(sql_driver)
+        changes = await general_tool.get_index_change(
+            current_data=current_data,
+            prev_data=prev_data,
+            time_interval=time_interval
+        )
+        
+        result = {
+            "success": True,
+            "stream_type": stream_type,
+            "data_provider": data_provider,
+            "stream_id": stream_id,
+            "time_interval": time_interval,
+            "change_count": len(changes),
+            "changes": changes,
+            "query_parameters": {
+                "from_time": from_time,
+                "to_time": to_time,
+                "time_interval": time_interval,
+                "frozen_at": frozen_at,
+                "base_time": base_time,
+                "use_cache": use_cache if stream_type == "composed" else None
+            }
+        }
+        
+        if not changes:
+            result["message"] = "No index changes could be calculated for the specified parameters"
+        
+        return format_text_response(result)
+        
+    except Exception as e:
+        logger.error(f"Error in get_index_change: {e}")
+        return format_error_response(f"Failed to calculate index change: {str(e)}")
 
 
 async def main():

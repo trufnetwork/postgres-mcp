@@ -3,10 +3,14 @@ Primitive Stream Tool
 """
 
 import logging
+from decimal import Decimal, getcontext
 from typing import Any, Dict, List, Optional
 
 from postgres_mcp.truf.query import PRIMITIVE_STREAM_LAST_RECORD_QUERY, PRIMITIVE_STREAM_RECORD_QUERY, STREAM_REF_QUERY
 from ..sql import SafeSqlDriver
+
+# Set precision to match NUMERIC(36,18)
+getcontext().prec = 36
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,9 @@ class PrimitiveStreamTool:
                 )
                 
                 if latest_record:
-                    indexed_value = (float(latest_record["value"]) * 100) / base_value
+                    base_value_decimal = Decimal(str(base_value))
+                    record_value = Decimal(str(latest_record["value"]))
+                    indexed_value = (record_value * Decimal('100')) / base_value_decimal
                     return [{
                         "event_time": latest_record["event_time"],
                         "value": str(indexed_value)
@@ -93,10 +99,12 @@ class PrimitiveStreamTool:
                 data_provider, stream_id, from_time, to_time, frozen_at
             )
             
-            # Calculate index for each record
+            # Calculate index for each record using Decimal for precision
             index_records = []
+            base_value_decimal = Decimal(str(base_value))
             for record in records:
-                indexed_value = (float(record["value"]) * 100) / base_value
+                record_value = Decimal(str(record["value"]))
+                indexed_value = (record_value * Decimal('100')) / base_value_decimal
                 index_records.append({
                     "event_time": record["event_time"],
                     "value": str(indexed_value)
@@ -204,7 +212,7 @@ class PrimitiveStreamTool:
         stream_id: str,
         base_time: Optional[int],
         frozen_at: Optional[int]
-    ) -> float:
+    ) -> Decimal:
         effective_base_time = base_time
         stream_ref = await self._get_stream_ref(data_provider, stream_id)
         
@@ -235,7 +243,7 @@ class PrimitiveStreamTool:
                     data_provider, stream_id, frozen_at
                 )
                 if first_record:
-                    return float(first_record["value"])
+                    return Decimal(str(first_record["value"]))
                 else:
                     raise ValueError("No base value found: no records in stream")
         
@@ -245,7 +253,7 @@ class PrimitiveStreamTool:
         )
         
         if exact_records:
-            return float(exact_records[0]["value"])
+            return Decimal(str(exact_records[0]["value"]))
         
         # If no exact match, find closest value before base_time
         before_record = await self._get_last_record_primitive(
@@ -254,7 +262,7 @@ class PrimitiveStreamTool:
         )
         
         if before_record:
-            return float(before_record["value"])
+            return Decimal(str(before_record["value"]))
         
         # If no value before, find closest value after base_time
         after_record = await self._get_first_record_primitive(
@@ -262,7 +270,7 @@ class PrimitiveStreamTool:
         )
         
         if after_record:
-            return float(after_record["value"])
+            return Decimal(str(after_record["value"]))
         
         raise ValueError("No base value found")
 
