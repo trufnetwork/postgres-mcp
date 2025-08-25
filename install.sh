@@ -304,7 +304,7 @@ if 'mcpServers' not in config:
 # Add truf-postgres server with full path and correct configuration
 config['mcpServers']['truf-postgres'] = {
     'command': postgres_mcp_path,
-    'args': ['--access-mode=unrestricted'],
+    'args': ['--access-mode=restricted'],
     'env': {
         'DATABASE_URI': db_uri
     }
@@ -338,7 +338,7 @@ fi
 
 # Test the postgres-mcp command with actual database
 echo "🧪 Testing postgres-mcp with database connection..."
-if timeout 10s env DATABASE_URI="$DB_URI" "$POSTGRES_MCP_PATH" --access-mode=unrestricted --version > /dev/null 2>&1; then
+if timeout 10s env DATABASE_URI="$DB_URI" "$POSTGRES_MCP_PATH" --access-mode=restricted --version > /dev/null 2>&1; then
     echo -e "${GREEN}✅ postgres-mcp responds correctly${NC}"
 else
     echo -e "${YELLOW}⚠️  postgres-mcp test completed (may have timed out, which is normal)${NC}"
