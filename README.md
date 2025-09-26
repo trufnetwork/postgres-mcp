@@ -26,15 +26,23 @@
 
 **Postgres MCP Pro** is an open source Model Context Protocol (MCP) server built to support you and your AI agents throughout the **entire development process**—from initial coding, through testing and deployment, and to production tuning and maintenance.
 
-Postgres MCP Pro does much more than wrap a database connection.
+This **TRUF.NETWORK enhanced version** includes specialized tools for blockchain data analysis and stream processing, in addition to all standard PostgreSQL capabilities.
 
-Features include:
+### Core Features
 
 - **🔍 Database Health** - analyze index health, connection utilization, buffer cache, vacuum health, sequence limits, replication lag, and more.
 - **⚡ Index Tuning** - explore thousands of possible indexes to find the best solution for your workload, using industrial-strength algorithms.
 - **📈 Query Plans** - validate and optimize performance by reviewing EXPLAIN plans and simulating the impact of hypothetical indexes.
 - **🧠 Schema Intelligence** - context-aware SQL generation based on detailed understanding of the database schema.
 - **🛡️ Safe SQL Execution** - configurable access control, including support for read-only mode and safe SQL parsing, making it usable for both development and production.
+
+### TRUF.NETWORK Enhanced Features
+
+- **📊 Stream Analytics** - Query composed and primitive stream records with advanced time-series capabilities
+- **📈 Index Calculations** - Calculate percentage changes and analyze stream performance over time
+- **🏗️ Taxonomy Intelligence** - Navigate hierarchical stream relationships and compositions
+- **⚡ Real-time Queries** - Access live blockchain data through optimized recursive CTEs
+- **🔐 Network Security** - Built-in access controls and safe query execution for production blockchain data
 
 Postgres MCP Pro supports both the [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) and [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) transports, for flexibility in different environments.
 
@@ -81,13 +89,26 @@ However, it often makes sense to use whichever method you are most familiar with
 
 Choose one of the following methods to install Postgres MCP Pro:
 
-#### Option 1: Using Docker
+#### Option 1: Using Docker (Recommended)
 
-Pull the Postgres MCP Pro MCP server Docker image.
-This image contains all necessary dependencies, providing a reliable way to run Postgres MCP Pro in a variety of environments.
+Pull the TRUF.NETWORK enhanced Postgres MCP server Docker image.
+This image contains all necessary dependencies and TRUF-specific tools, providing a reliable way to run the enhanced MCP server in a variety of environments.
 
 ```bash
-docker pull crystaldba/postgres-mcp
+# TRUF.NETWORK enhanced version with blockchain analytics
+docker pull ghcr.io/trufnetwork/postgres-mcp:latest
+```
+
+**🚀 Quick Start with Docker:**
+```bash
+# Run with SSE transport for Claude Desktop integration
+docker run -d --name postgres-mcp -p 8000:8000 \
+  -e DATABASE_URI="postgresql://username:password@host.docker.internal:5432/dbname" \
+  ghcr.io/trufnetwork/postgres-mcp:latest \
+  --transport=sse --sse-host=0.0.0.0 --access-mode=restricted
+
+# Test the connection
+curl -N -H "Accept: text/event-stream" http://localhost:8000/sse
 ```
 
 
@@ -126,6 +147,7 @@ You will now edit the `mcpServers` section of the configuration file.
 
 ##### If you are using Docker
 
+**Option A: STDIO Transport (Direct Docker)**
 ```json
 {
   "mcpServers": {
@@ -137,8 +159,8 @@ You will now edit the `mcpServers` section of the configuration file.
         "--rm",
         "-e",
         "DATABASE_URI",
-        "crystaldba/postgres-mcp",
-        "--access-mode=unrestricted"
+        "ghcr.io/trufnetwork/postgres-mcp:latest",
+        "--access-mode=restricted"
       ],
       "env": {
         "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
@@ -148,7 +170,41 @@ You will now edit the `mcpServers` section of the configuration file.
 }
 ```
 
-The Postgres MCP Pro Docker image will automatically remap the hostname `localhost` to work from inside of the container.
+**Option B: SSE Transport (Recommended for TRUF.NETWORK)**
+
+First, run the Docker container with SSE transport:
+```bash
+docker run -d --name postgres-mcp -p 8000:8000 \
+  -e DATABASE_URI="postgresql://username:password@host.docker.internal:5432/dbname" \
+  ghcr.io/trufnetwork/postgres-mcp:latest \
+  --transport=sse --sse-host=0.0.0.0 --access-mode=restricted
+```
+
+Then install the SSE bridge and configure Claude Desktop:
+```bash
+npm install -g mcp-remote
+```
+
+```json
+{
+  "mcpServers": {
+    "truf-postgres": {
+      "command": "mcp-remote",
+      "args": [
+        "http://localhost:8000/sse"
+      ]
+    }
+  }
+}
+```
+
+**Benefits of SSE Transport:**
+- ✅ Better performance for complex queries
+- ✅ Real-time streaming capabilities
+- ✅ More reliable connection handling
+- ✅ Support for concurrent AI agent sessions
+
+The Postgres MCP Pro Docker image will automatically remap the hostname `localhost` to work from inside of the container:
 
 - MacOS/Windows: Uses `host.docker.internal` automatically
 - Linux: Uses `172.17.0.1` or the appropriate host address automatically
@@ -371,6 +427,76 @@ For example, it implements a version of the [Anytime Algorithm of Database Tunin
 
 Postgres MCP Pro complements generative AI by adding deterministic tools and classical optimization algorithms
 The combination is both reliable and flexible.
+
+
+## TRUF.NETWORK Enhanced Tools
+
+This enhanced version includes specialized tools for blockchain data analysis and stream processing. These tools are designed specifically for the TRUF.NETWORK ecosystem and provide AI agents with powerful capabilities for analyzing blockchain data and stream hierarchies.
+
+### Stream Analytics Tools
+
+- **`get_composed_stream_records`** - Query calculated time series data from composed streams
+  ```
+  Parameters: data_provider, stream_id, from_time, to_time, frozen_at, use_cache
+  Returns: Time series records with calculated values and metadata
+  ```
+
+- **`get_latest_composed_stream_record`** - Get the most recent record from a composed stream
+  ```
+  Parameters: data_provider, stream_id, frozen_at
+  Returns: Latest calculated value with timestamp
+  ```
+
+- **`get_primitive_stream_records`** - Access raw primitive stream data
+  ```
+  Parameters: data_provider, stream_id, from_time, to_time, frozen_at
+  Returns: Raw event data from primitive streams
+  ```
+
+### Index and Change Analytics
+
+- **`get_index`** - Retrieve stream index values over time periods
+  ```
+  Parameters: data_provider, stream_id, from_time, to_time, frozen_at
+  Returns: Index values with timestamps for analysis
+  ```
+
+- **`get_index_change`** - Calculate percentage changes in stream indices
+  ```
+  Parameters: data_provider, stream_id, from_time, to_time, time_interval, frozen_at
+  Returns: Percentage change calculations with time comparisons
+  ```
+
+### Stream Intelligence Tools
+
+- **`check_stream_type`** - Determine if a stream is primitive or composed
+- **`get_stream_composition`** - Analyze hierarchical relationships and taxonomies
+- **Advanced recursive CTEs** - Navigate complex stream hierarchies and weights
+
+### Business Intelligence Features
+
+These tools enable AI agents to perform sophisticated blockchain data analysis:
+
+- **Real-time Analytics**: Query live blockchain data with time-travel capabilities
+- **Performance Monitoring**: Track stream index changes and performance metrics
+- **Hierarchical Analysis**: Navigate complex stream taxonomies and compositions
+- **Data Validation**: Ensure data integrity with frozen-at queries for consistency
+
+### Example Usage Scenarios
+
+Ask your AI agent questions like:
+- "What's the latest calculated value for stream X from data provider Y?"
+- "Show me the percentage change in index values over the last week"
+- "Analyze the composition and weights of this hierarchical stream"
+- "Compare performance metrics between different stream types"
+
+### Database Schema Support
+
+The enhanced version includes optimized support for TRUF.NETWORK's `main` schema with tables:
+- `main.streams` - Stream definitions and metadata
+- `main.primitive_events` - Raw blockchain event data
+- `main.taxonomies` - Hierarchical stream relationships
+- `main.data_providers` - Data provider information and configurations
 
 
 *Why are MCP tools needed when the LLM can reason, generate SQL, etc?*

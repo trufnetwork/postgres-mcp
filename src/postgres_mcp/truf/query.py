@@ -1027,7 +1027,6 @@ TAXONOMIES_QUERY = """
 """
 
 
-
 STREAM_REF_QUERY = """
   SELECT s.id as stream_ref
   FROM main.streams s

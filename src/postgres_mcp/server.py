@@ -1,15 +1,15 @@
 # ruff: noqa: B008
 import argparse
 import asyncio
-import json
 import logging
 import os
 import signal
 import sys
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from typing import List
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 import mcp.types as types
@@ -511,66 +511,66 @@ async def get_top_queries(
     except Exception as e:
         logger.error(f"Error getting slow queries: {e}")
         return format_error_response(str(e))
-    
+
+
 @mcp.tool(description="Get records from COMPOSED streams only (stream_type='composed'). Use check_stream_type first if unsure.")
 async def get_composed_stream_records(
     data_provider: str = Field(description="Stream deployer address (0x... format, 42 characters)"),
     stream_id: str = Field(description="Composed stream ID (starts with 'st', 32 characters total)"),
-    from_time: Optional[int] = Field(description="Start timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None),
-    to_time: Optional[int] = Field(description="End timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None),
+    from_time: Optional[int] = Field(
+        description="Start timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None
+    ),
+    to_time: Optional[int] = Field(
+        description="End timestamp (inclusive). If both from_time and to_time are omitted, returns latest record only.", default=None
+    ),
     frozen_at: Optional[int] = Field(description="Created-at cutoff timestamp for time-travel queries (optional)", default=None),
     use_cache: bool = Field(description="Whether to use cache for performance optimization", default=False),
 ) -> ResponseType:
     """
     Get records from composed streams with complex time series calculations.
-    
+
     This tool is specifically for streams where stream_type='composed' in the streams table.
-    It handles recursive taxonomy resolution, time-varying weights, aggregation, 
+    It handles recursive taxonomy resolution, time-varying weights, aggregation,
     and Last Observation Carried Forward (LOCF) logic.
-    
+
     Use this when:
-    - Querying streams with stream_type = 'composed' 
+    - Querying streams with stream_type = 'composed'
     - Need calculated/aggregated values from multiple primitive streams
     - Require time series data with complex dependencies
-    
+
     For primitive streams (stream_type='primitive'), use direct queries on primitive_events table.
-    
+
     Args:
         data_provider: Stream deployer address (must be 0x followed by 40 hex characters)
         stream_id: Composed stream identifier (must start with 'st' and be 32 chars total)
         from_time: Start timestamp (inclusive) - omit both from/to for latest record
-        to_time: End timestamp (inclusive) - omit both from/to for latest record  
+        to_time: End timestamp (inclusive) - omit both from/to for latest record
         frozen_at: Optional timestamp for time-travel queries
         use_cache: Whether to use cache for better performance
-        
+
     Returns:
         List of records with event_time and calculated value fields
     """
     try:
         # Validate input parameters
-        if not data_provider.startswith('0x') or len(data_provider) != 42:
+        if not data_provider.startswith("0x") or len(data_provider) != 42:
             return format_error_response("data_provider must be 0x followed by 40 hex characters")
-            
-        if not stream_id.startswith('st') or len(stream_id) != 32:
+
+        if not stream_id.startswith("st") or len(stream_id) != 32:
             return format_error_response("stream_id must start with 'st' and be 32 characters total")
-        
+
         # Validate time range
         if from_time is not None and to_time is not None and from_time > to_time:
             return format_error_response(f"Invalid time range: from_time ({from_time}) > to_time ({to_time})")
-        
+
         sql_driver = await get_sql_driver()
         composed_tool = ComposedStreamTool(sql_driver)
-        
+
         # Execute the composed stream calculation
         records = await composed_tool.get_record_composed(
-            data_provider=data_provider,
-            stream_id=stream_id,
-            from_time=from_time,
-            to_time=to_time,
-            frozen_at=frozen_at,
-            use_cache=use_cache
+            data_provider=data_provider, stream_id=stream_id, from_time=from_time, to_time=to_time, frozen_at=frozen_at, use_cache=use_cache
         )
-        
+
         # Format successful response
         result = {
             "success": True,
@@ -579,22 +579,17 @@ async def get_composed_stream_records(
             "stream_id": stream_id,
             "record_count": len(records),
             "records": records,
-            "query_parameters": {
-                "from_time": from_time,
-                "to_time": to_time,
-                "frozen_at": frozen_at,
-                "use_cache": use_cache
-            }
+            "query_parameters": {"from_time": from_time, "to_time": to_time, "frozen_at": frozen_at, "use_cache": use_cache},
         }
-        
+
         if len(records) == 0:
             result["message"] = "No records found for the specified composed stream and time range"
-        
+
         return format_text_response(result)
-        
+
     except Exception as e:
         logger.error(f"Error in get_composed_stream_records: {e}")
-        return format_error_response(f"Failed to get composed stream records: {str(e)}")
+        return format_error_response(f"Failed to get composed stream records: {e!s}")
 
 
 @mcp.tool(description="Get the latest record from a composed stream (convenience function)")
@@ -606,18 +601,18 @@ async def get_latest_composed_stream_record(
 ) -> ResponseType:
     """
     Get the most recent record from a composed stream.
-    
-    This is a convenience function that calls get_composed_stream_records with 
+
+    This is a convenience function that calls get_composed_stream_records with
     both from_time and to_time set to None, which triggers the "latest record only" mode.
-    
+
     Use this when you only need the current/latest calculated value from a composed stream.
-    
+
     Args:
-        data_provider: Stream deployer address  
+        data_provider: Stream deployer address
         stream_id: Composed stream identifier
         frozen_at: Optional timestamp for time-travel queries
         use_cache: Whether to use cache for performance
-        
+
     Returns:
         Single latest record with event_time and calculated value
     """
@@ -627,7 +622,7 @@ async def get_latest_composed_stream_record(
         from_time=None,  # Both None triggers latest record mode
         to_time=None,
         frozen_at=frozen_at,
-        use_cache=use_cache
+        use_cache=use_cache,
     )
 
 
@@ -638,21 +633,21 @@ async def check_stream_type(
 ) -> ResponseType:
     """
     Check whether a stream is primitive or composed type.
-    
+
     This helper tool allows Claude to determine which tool to use:
     - For primitive streams: Query primitive_events table directly
     - For composed streams: Use get_composed_stream_records tool
-    
+
     Args:
         data_provider: Stream deployer address
         stream_id: Stream identifier to check
-        
+
     Returns:
         Stream type information and guidance on which tool to use
     """
     try:
         sql_driver = await get_sql_driver()
-        
+
         rows = await SafeSqlDriver.execute_param_query(
             sql_driver,
             """
@@ -667,16 +662,13 @@ async def check_stream_type(
             [data_provider.lower(), stream_id],
         )
         if not rows:
-            return format_text_response({
-                "found": False,
-                "message": f"Stream not found: {data_provider}/{stream_id}",
-                "data_provider": data_provider,
-                "stream_id": stream_id
-            })
-        
+            return format_text_response(
+                {"found": False, "message": f"Stream not found: {data_provider}/{stream_id}", "data_provider": data_provider, "stream_id": stream_id}
+            )
+
         row = rows[0]
         stream_type = row.cells["stream_type"]
-        
+
         result = {
             "found": True,
             "data_provider": row.cells["data_provider"],
@@ -685,15 +677,16 @@ async def check_stream_type(
             "created_at": row.cells["created_at"],
             "recommended_action": {
                 "primitive": "Query the primitive_events table directly for this stream",
-                "composed": "Use get_composed_stream_records tool for calculated time series data"
-            }.get(stream_type, "Unknown stream type")
+                "composed": "Use get_composed_stream_records tool for calculated time series data",
+            }.get(stream_type, "Unknown stream type"),
         }
-        
+
         return format_text_response(result)
-        
+
     except Exception as e:
         logger.error(f"Error checking stream type: {e}")
-        return format_error_response(f"Failed to check stream type: {str(e)}")
+        return format_error_response(f"Failed to check stream type: {e!s}")
+
 
 @mcp.tool(description="Describe the taxonomy or composition of a composed stream - shows child streams, weights, and relationships")
 async def describe_stream_taxonomies(
@@ -703,34 +696,32 @@ async def describe_stream_taxonomies(
 ) -> ResponseType:
     """
     Describe the taxonomy composition of a composed stream.
-    
-    Shows what child streams make up a composed stream, their weights, 
+
+    Shows what child streams make up a composed stream, their weights,
     and when the taxonomy definitions were created.
-    
+
     Use this when users ask:
     - "What is the composition of this stream?"
     - "What streams make up this composed stream?"
     - "Show me the taxonomy of this stream"
     - "What are the weights in this stream?"
-    
+
     Args:
         data_provider: Parent stream deployer address
         stream_id: Parent stream identifier
         latest_group_sequence: True = only current active taxonomy, False = all historical versions
-        
+
     Returns:
         List of child streams with their weights and taxonomy details
     """
     try:
         sql_driver = await get_sql_driver()
         composed_tool = ComposedStreamTool(sql_driver)
-        
+
         records = await composed_tool.describe_taxonomies(
-            data_provider=data_provider,
-            stream_id=stream_id,
-            latest_group_sequence=latest_group_sequence
+            data_provider=data_provider, stream_id=stream_id, latest_group_sequence=latest_group_sequence
         )
-        
+
         if not records:
             result = {
                 "success": True,
@@ -738,7 +729,7 @@ async def describe_stream_taxonomies(
                 "data_provider": data_provider,
                 "stream_id": stream_id,
                 "taxonomy_count": 0,
-                "taxonomy": []
+                "taxonomy": [],
             }
         else:
             result = {
@@ -751,15 +742,16 @@ async def describe_stream_taxonomies(
                 "summary": {
                     "total_child_streams": len(set(r["child_stream_id"] for r in records)),
                     "total_weight": sum(float(r["weight"]) for r in records),
-                    "group_sequences": sorted(set(r["group_sequence"] for r in records))
-                }
+                    "group_sequences": sorted(set(r["group_sequence"] for r in records)),
+                },
             }
-        
+
         return format_text_response(result)
-        
+
     except Exception as e:
         logger.error(f"Error describing taxonomies: {e}")
-        return format_error_response(f"Failed to describe stream taxonomies: {str(e)}")
+        return format_error_response(f"Failed to describe stream taxonomies: {e!s}")
+
 
 @mcp.tool(description="Get index data for COMPOSED STREAM ONLY")
 async def get_composed_stream_index(
@@ -776,7 +768,7 @@ async def get_composed_stream_index(
     """
     try:
         sql_driver = await get_sql_driver()
-        
+
         composed_tool = ComposedStreamTool(sql_driver)
         records = await composed_tool.get_index(
             data_provider=data_provider,
@@ -785,24 +777,25 @@ async def get_composed_stream_index(
             to_time=to_time,
             frozen_at=frozen_at,
             base_time=base_time,
-            use_cache=use_cache
+            use_cache=use_cache,
         )
-        
+
         result = {
             "success": True,
             "stream_type": "composed",
             "data_provider": data_provider,
             "stream_id": stream_id,
             "index_count": len(records),
-            "index_data": records
+            "index_data": records,
         }
-        
+
         return format_text_response(result)
-        
+
     except Exception as e:
         logger.error(f"Error in get_stream_index: {e}")
-        return format_error_response(f"Failed to get stream index: {str(e)}")
-    
+        return format_error_response(f"Failed to get stream index: {e!s}")
+
+
 @mcp.tool(description="Get index data for PRIMITIVE STREAM ONLY")
 async def get_primitive_stream_index(
     data_provider: str = Field(description="Stream deployer address (0x... format)"),
@@ -834,14 +827,14 @@ async def get_primitive_stream_index(
             "data_provider": data_provider,
             "stream_id": stream_id,
             "index_count": len(records),
-            "index_data": records
+            "index_data": records,
         }
 
         return format_text_response(result)
 
     except Exception as e:
         logger.error(f"Error in get_stream_index: {e}")
-        return format_error_response(f"Failed to get stream index: {str(e)}")
+        return format_error_response(f"Failed to get stream index: {e!s}")
 
 
 @mcp.tool(description="Calculate index change percentage over time interval - returns percentage change values (e.g., 2.147 = 2.147% change)")
@@ -857,46 +850,42 @@ async def get_index_change(
 ) -> ResponseType:
     """
     Calculate percentage change in index values over a specified time interval.
-    
+
     This tool compares current index values with previous values from time_interval ago.
-    For each current data point at time T, it finds the corresponding previous value 
+    For each current data point at time T, it finds the corresponding previous value
     at or before time (T - time_interval) and calculates: ((current - previous) * 100) / previous
-    
+
     Returns percentage change values where 2.147 means a 2.147% increase.
-    
+
     The tool automatically detects whether the stream is composed or primitive and uses
     the appropriate index calculation method.
-    
+
     Use this when:
     - Analyzing index performance over time periods
     - Calculating returns or percentage changes
     - Comparing current values to historical baselines
-    
+
     Args:
         data_provider: Stream deployer address
         stream_id: Stream identifier
         from_time: Start timestamp for current data range
-        to_time: End timestamp for current data range  
+        to_time: End timestamp for current data range
         time_interval: Time period to look back (in same units as timestamps)
         frozen_at: Optional timestamp for time-travel queries
         base_time: Optional base timestamp for index calculations
         use_cache: Whether to use cache for performance (composed streams only)
-        
+
     Returns:
         List of time points with their percentage change values (e.g., 2.147 = 2.147% change)
     """
     try:
         if from_time > to_time:
-            return format_error_response(
-                f"Invalid time range: from_time ({from_time}) > to_time ({to_time})"
-            )
+            return format_error_response(f"Invalid time range: from_time ({from_time}) > to_time ({to_time})")
         if time_interval <= 0:
-            return format_error_response(
-                f"time_interval must be > 0 (got {time_interval})"
-            )
-        
+            return format_error_response(f"time_interval must be > 0 (got {time_interval})")
+
         sql_driver = await get_sql_driver()
-        
+
         rows = await SafeSqlDriver.execute_param_query(
             sql_driver,
             """
@@ -906,16 +895,16 @@ async def get_index_change(
             """,
             [data_provider.lower(), stream_id],
         )
-        
+
         if not rows:
             return format_error_response(f"Stream not found: {data_provider}/{stream_id}")
-        
+
         stream_type = rows[0].cells["stream_type"]
-        
+
         # Calculate previous data time range
         earliest_prev = from_time - time_interval
         latest_prev = to_time - time_interval
-        
+
         # Get current index data based on stream type
         if stream_type == "composed":
             composed_tool = ComposedStreamTool(sql_driver)
@@ -926,7 +915,7 @@ async def get_index_change(
                 to_time=to_time,
                 frozen_at=frozen_at,
                 base_time=base_time,
-                use_cache=use_cache
+                use_cache=use_cache,
             )
             # Get previous data
             prev_data = await composed_tool.get_index(
@@ -936,17 +925,12 @@ async def get_index_change(
                 to_time=latest_prev,
                 frozen_at=frozen_at,
                 base_time=base_time,
-                use_cache=use_cache
+                use_cache=use_cache,
             )
         else:  # primitive
             primitive_tool = PrimitiveStreamTool(sql_driver)
             current_data = await primitive_tool.get_index(
-                data_provider=data_provider,
-                stream_id=stream_id,
-                from_time=from_time,
-                to_time=to_time,
-                frozen_at=frozen_at,
-                base_time=base_time
+                data_provider=data_provider, stream_id=stream_id, from_time=from_time, to_time=to_time, frozen_at=frozen_at, base_time=base_time
             )
             # Get previous data
             prev_data = await primitive_tool.get_index(
@@ -955,17 +939,13 @@ async def get_index_change(
                 from_time=earliest_prev,
                 to_time=latest_prev,
                 frozen_at=frozen_at,
-                base_time=base_time
+                base_time=base_time,
             )
-        
+
         # Calculate changes using GeneralStreamTool
         general_tool = GeneralStreamTool(sql_driver)
-        changes = await general_tool.get_index_change(
-            current_data=current_data,
-            prev_data=prev_data,
-            time_interval=time_interval
-        )
-        
+        changes = await general_tool.get_index_change(current_data=current_data, prev_data=prev_data, time_interval=time_interval)
+
         result = {
             "success": True,
             "stream_type": stream_type,
@@ -980,18 +960,18 @@ async def get_index_change(
                 "time_interval": time_interval,
                 "frozen_at": frozen_at,
                 "base_time": base_time,
-                "use_cache": use_cache if stream_type == "composed" else None
-            }
+                "use_cache": use_cache if stream_type == "composed" else None,
+            },
         }
-        
+
         if not changes:
             result["message"] = "No index changes could be calculated for the specified parameters"
-        
+
         return format_text_response(result)
-        
+
     except Exception as e:
         logger.error(f"Error in get_index_change: {e}")
-        return format_error_response(f"Failed to calculate index change: {str(e)}")
+        return format_error_response(f"Failed to calculate index change: {e!s}")
 
 
 async def main():
